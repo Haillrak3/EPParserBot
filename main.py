@@ -7,21 +7,36 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+# --- ДОБАВИЛИ ТУТ ---
+from aiogram.client.session.aiohttp import AiohttpSession 
 
 # --- НАСТРОЙКИ ---
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+# --- ДОБАВИЛИ ТУТ (Замени на свои данные) ---
+PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
+
 USERS_FILE = "users.txt"
-# ID канала, из которого нужно брать заказы
 SOURCE_CHANNEL_ID = -1003769319642 
 
 if not TOKEN:
     exit("Ошибка: Токен не найден в .env!")
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
-dp = Dispatcher()
 
+# --- ИЗМЕНИЛИ ТУТ ---
+# Создаем сессию с прокси
+session = AiohttpSession(proxy=PROXY_URL)
+
+# Передаем сессию в бота
+bot = Bot(
+    token=TOKEN, 
+    session=session, 
+    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
+)
+# ------------------
+
+dp = Dispatcher()
 subscribed_users = set()
 
 STORES = {
@@ -52,11 +67,9 @@ def save_user(user_id):
 
 # --- ЛОГИКА ПАРСИНГА ---
 def parse_order(text: str) -> str:
-    # 1. Номер заказа
     order_match = re.search(r'#(\d+)', text)
     order_id = order_match.group(1) if order_match else "???"
 
-    # 2. Номер клиента
     phone_match = re.search(r'Клиент\s*([\+\d\s\-\(\)]+)', text)
     if phone_match:
         digits = re.sub(r'\D', '', phone_match.group(1))
@@ -64,11 +77,9 @@ def parse_order(text: str) -> str:
     else:
         clean_phone = "не найден"
 
-    # 3. Сумма заказа
-    amount_match = re.search(r'Сумма заказа:\s*([\d\s ]+)₽', text)
+    amount_match = re.search(r'Сумма заказа:\s*([\d\s ]+)₽', text)
     amount = amount_match.group(1).strip() + " ₽" if amount_match else "не найдена"
     
-    # 4. Обработка комментария (убираем \)
     comment_match = re.search(r'Комментарий от клиента:\s*(.*)', text, re.DOTALL)
     if comment_match:
         comment_raw = comment_match.group(1).replace('\\', '').strip()
@@ -82,11 +93,9 @@ def parse_order(text: str) -> str:
         order_display = f"{order_id}"
         has_comment = True
 
-    # 5. Проверка на Рыбу
     has_weight_item = re.search(r'\d+\s*(?:г|кг)\.', text)
     fish_status = " 🐟 *РЫБА!*" if (has_weight_item and has_comment) else ""
 
-    # 6. Адрес
     address_match = re.search(r'(ул\.[^\n]+)', text)
     if address_match:
         full_address = address_match.group(1).strip()
@@ -95,7 +104,6 @@ def parse_order(text: str) -> str:
     else:
         display_address = "❌ адрес не указан"
 
-    # 7. Сборка сообщения
     result = (
         f"*{display_address}*\n\n"
         f"*ЗАКАЗ:* #`{order_display}`\n\n"
@@ -117,11 +125,9 @@ async def cmd_start(message: types.Message):
 
 @dp.channel_post(F.text)
 async def handle_channel_post(message: types.Message):
-    # ПРОВЕРКА ID КАНАЛА
     if message.chat.id != SOURCE_CHANNEL_ID:
         return
 
-    # Дополнительная проверка на содержание
     if "заказ" not in message.text.lower():
         return
 
@@ -135,15 +141,22 @@ async def handle_channel_post(message: types.Message):
 
 @dp.message(F.text)
 async def handle_private_test(message: types.Message):
-    """Оставляем возможность тестировать в личке бота вручную"""
     clean_info = parse_order(message.text)
     await message.answer(f"*Результат теста:*\n\n{clean_info}")
 
 async def main():
     load_users()
-    print(f"Бот запущен. Слушает канал: {SOURCE_CHANNEL_ID}")
+    print(f"Бот запущен через прокси. Слушает канал: {SOURCE_CHANNEL_ID}")
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    
+    # --- ДОБАВИЛИ ТУТ ---
+    # Оборачиваем в try-except для защиты от сетевых сбоев
+    while True:
+        try:
+            await dp.start_polling(bot)
+        except Exception as e:
+            logging.error(f"Критическая ошибка: {e}")
+            await asyncio.sleep(5) # Ждем перед перезапуском
 
 if __name__ == "__main__":
     try:
