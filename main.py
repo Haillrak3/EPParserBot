@@ -15,7 +15,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
 USERS_FILE = "users.txt"
-SOURCE_CHANNEL_ID = -1003618329053 
+SOURCE_CHANNEL_ID = -1003769319642
 
 if not TOKEN:
     exit("Ошибка: Токен не найден в .env!")
@@ -70,7 +70,7 @@ def parse_order(text: str) -> str:
     comment_raw = comment_match.group(1).replace('\\', '').strip() if comment_match else ""
     
     has_comment = bool(comment_raw)
-    order_display = order_id if has_comment else f"{order_id} нп"
+    order_display = order_id if has_comment else f"{order_id}"
 
     # --- ЛОГИКА ПАКЕТОВ ---
     items_part = text.split("Тара:")[0]
