@@ -16,6 +16,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
 USERS_FILE = "users.txt"
 SOURCE_CHANNEL_ID = -1003769319642
+LAST_ID_FILE = "last_id.txt"
 
 if not TOKEN:
     exit("Ошибка: Токен не найден в .env!")
@@ -50,6 +51,18 @@ def save_user(user_id):
         subscribed_users.add(user_id)
         with open(USERS_FILE, "a") as f:
             f.write(f"{user_id}\n")
+
+def get_last_id() -> int:
+    if os.path.exists(LAST_ID_FILE):
+        with open(LAST_ID_FILE, "r") as f:
+            content = f.read().strip()
+            if content.isdigit():
+                return int(content)
+    return 0
+
+def save_last_id(message_id: int):
+    with open(LAST_ID_FILE, "w") as f:
+        f.write(str(message_id))
 
 # --- ЛОГИКА ПАРСИНГА ---
 def parse_order(text: str) -> str:
@@ -120,6 +133,28 @@ async def handle_channel_post(message: types.Message):
     # Мониторим только указанный канал
     if message.chat.id != SOURCE_CHANNEL_ID or "заказ" not in message.text.lower():
         return
+
+    current_id = message.message_id
+    last_id = get_last_id()
+
+    # ПРОВЕРКА НА ПРОПУСКИ:
+    if last_id > 0 and current_id > last_id + 1:
+        missed_count = (current_id - last_id) - 1
+        warning_text = (
+            f"⚠️ *ВНИМАНИЕ! ВОЗМОЖЕН ПРОПУСК!*\n\n"
+            f"Бот зафиксировал скачок сообщений. Пропущено постов в канале: *{missed_count} шт.*\n"
+            f"Пожалуйста, зайдите в канал и проверьте заказы вручную!"
+        )
+        for user_id in subscribed_users:
+            try:
+                await bot.send_message(chat_id=user_id, text=warning_text)
+            except Exception as e:
+                logging.error(f"Ошибка отправки предупреждения {user_id}: {e}")
+
+    # Сохраняем текущий ID как последний успешный
+    save_last_id(current_id)
+
+    # Стандартная логика
     clean_info = parse_order(message.text)
     for user_id in subscribed_users:
         try:
@@ -135,7 +170,10 @@ async def handle_private_test(message: types.Message):
 async def main():
     load_users()
     print(f"Бот запущен. Канал: {SOURCE_CHANNEL_ID}")
-    await bot.delete_webhook(drop_pending_updates=True)
+    
+    # drop_pending_updates изменено на False
+    await bot.delete_webhook(drop_pending_updates=False) 
+    
     while True:
         try:
             await dp.start_polling(bot)
@@ -145,6 +183,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main()) # Просто вызываем функцию
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
