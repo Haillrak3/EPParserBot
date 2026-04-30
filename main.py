@@ -96,8 +96,16 @@ def parse_order(text: str) -> str:
     else:
         bags_count = 1
 
-    has_weight_item = re.search(r'\d+\s*(?:г|кг)\.', text)
-    fish_status = " 🐟 *РЫБА!*" if (has_weight_item and has_comment) else ""
+    NON_FISH_KEYWORDS = [
+        'миндаль', 'фисташки', 'фисташка', 'арахис',
+    ]
+    weight_pattern = re.compile(r'\d+\s*(?:г|кг)\.')
+    has_fish_item = any(
+        weight_pattern.search(line)
+        and not any(kw in line.lower() for kw in NON_FISH_KEYWORDS)
+        for line in text.splitlines()
+    )
+    fish_status = " 🐟 *РЫБА!*" if (has_fish_item and has_comment) else ""
 
     address_match = re.search(r'(ул\.[^\n]+)', text)
     if address_match:
