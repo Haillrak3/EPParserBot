@@ -16,6 +16,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
 USERS_FILE = "users.txt"
 SOURCE_CHANNEL_ID = -1003769319642
+TARGET_GROUP_ID = -1003981065788  # Добавлен ID новой группы для отправки
 LAST_ID_FILE = "last_id.txt"
 
 if not TOKEN:
@@ -164,6 +165,14 @@ async def handle_channel_post(message: types.Message):
 
     # Стандартная логика
     clean_info = parse_order(message.text)
+    
+    # Добавленная отправка в целевую группу
+    try:
+        await bot.send_message(chat_id=TARGET_GROUP_ID, text=clean_info)
+    except Exception as e:
+        logging.error(f"Ошибка отправки в группу {TARGET_GROUP_ID}: {e}")
+    
+    # Отправка подписчикам
     for user_id in subscribed_users:
         try:
             await bot.send_message(chat_id=user_id, text=clean_info)
