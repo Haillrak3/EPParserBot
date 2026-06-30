@@ -39,6 +39,12 @@ STORES = {
     "ул. Кантемировская, 31а": "9️⃣"
 }
 
+
+def escape_md(text: str) -> str:
+    for ch in ("*", "_", "`", "["):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
 def load_users():
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, "r") as f:
@@ -125,7 +131,7 @@ def parse_order(text: str) -> str:
     # Вывод только при наличии комментария
     if has_comment:
         result += f"\n\n*ПАКЕТОВ:* {bags_count}шт."
-        result += f"\n\n💬 *КОММЕНТАРИЙ:* {comment_raw}"
+        result += f"\n\n💬 *КОММЕНТАРИЙ:* {escape_md(comment_raw)}"
 
     return result
 

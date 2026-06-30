@@ -1,1 +1,7 @@
 .env
+users.txt
+last_id.txt
+venv/
+.venv/
+__pycache__/
+*.pyc
