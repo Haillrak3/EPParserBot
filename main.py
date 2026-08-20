@@ -3,6 +3,8 @@ import asyncio
 import logging
 import re
 import math
+import json
+import hashlib
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -15,8 +17,13 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
 USERS_FILE = "users.txt"
-SOURCE_CHAT_ID = -1004443006213  # группа "ЕП v2"
-LAST_ID_FILE = "last_id.txt"
+SOURCE_CHAT_IDS = {
+    -1003769319642,  # канал "ЁП App (новый)" — старый источник
+    -1004443006213,  # группа "ЕП v2" — новый источник
+}
+LAST_ID_FILE = "last_ids.json"    # {chat_id: last_message_id} — отдельно по каждому источнику
+SEEN_FILE = "seen_orders.json"    # ключи уже разосланных заказов
+SEEN_LIMIT = 1000
 
 if not TOKEN:
     exit("Ошибка: Токен не найден в .env!")
@@ -26,6 +33,8 @@ session = AiohttpSession(proxy=PROXY_URL)
 bot = Bot(token=TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher()
 subscribed_users = set()
+seen_orders = []      # ключи в порядке поступления, хвост длиной SEEN_LIMIT
+seen_keys = set()     # он же для быстрой проверки
 
 STORES = {
     "ул. Новомарьинская, 14/15": "1️⃣",
@@ -58,17 +67,45 @@ def save_user(user_id):
         with open(USERS_FILE, "a") as f:
             f.write(f"{user_id}\n")
 
-def get_last_id() -> int:
+def load_last_ids() -> dict:
     if os.path.exists(LAST_ID_FILE):
-        with open(LAST_ID_FILE, "r") as f:
-            content = f.read().strip()
-            if content.isdigit():
-                return int(content)
-    return 0
+        try:
+            with open(LAST_ID_FILE, "r", encoding="utf-8") as f:
+                return {int(k): int(v) for k, v in json.load(f).items()}
+        except Exception as e:
+            logging.error(f"Не читается {LAST_ID_FILE}: {e}")
+    return {}
 
-def save_last_id(message_id: int):
-    with open(LAST_ID_FILE, "w") as f:
-        f.write(str(message_id))
+def save_last_id(chat_id: int, message_id: int):
+    data = load_last_ids()
+    data[chat_id] = message_id
+    with open(LAST_ID_FILE, "w", encoding="utf-8") as f:
+        json.dump({str(k): v for k, v in data.items()}, f)
+
+def load_seen():
+    if os.path.exists(SEEN_FILE):
+        try:
+            with open(SEEN_FILE, "r", encoding="utf-8") as f:
+                seen_orders.extend(json.load(f))
+        except Exception as e:
+            logging.error(f"Не читается {SEEN_FILE}: {e}")
+    seen_keys.update(seen_orders)
+
+def mark_seen(key: str):
+    seen_orders.append(key)
+    seen_keys.add(key)
+    del seen_orders[:-SEEN_LIMIT]
+    seen_keys.intersection_update(seen_orders)
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(seen_orders, f, ensure_ascii=False)
+
+def order_key(text: str) -> str:
+    # Один и тот же заказ приходит из двух источников — ключом служит номер #N.
+    match = re.search(r'#(\d+)', text)
+    if match:
+        return match.group(1)
+    # Номера нет — опираемся на текст; пробелы между источниками могут отличаться.
+    return "h:" + hashlib.sha1(" ".join(text.split()).encode("utf-8")).hexdigest()
 
 # --- ЛОГИКА ПАРСИНГА ---
 def parse_order(text: str) -> str:
@@ -142,22 +179,24 @@ async def cmd_start(message: types.Message):
     save_user(message.from_user.id)
     await message.answer("✅ Подписка оформлена!")
 
-@dp.message(F.chat.id == SOURCE_CHAT_ID, F.text)
+@dp.channel_post(F.chat.id.in_(SOURCE_CHAT_IDS), F.text)
+@dp.message(F.chat.id.in_(SOURCE_CHAT_IDS), F.text)
 async def handle_source_post(message: types.Message):
-    # Мониторим только указанную группу
+    # Посты канала приходят как channel_post, сообщения группы — как message.
     if "заказ" not in message.text.lower():
         return
 
+    chat_id = message.chat.id
     current_id = message.message_id
-    last_id = get_last_id()
+    last_id = load_last_ids().get(chat_id, 0)
 
     # ПРОВЕРКА НА ПРОПУСКИ:
     if last_id > 0 and current_id > last_id + 1:
         missed_count = (current_id - last_id) - 1
         warning_text = (
             f"⚠️ *ВНИМАНИЕ! ВОЗМОЖЕН ПРОПУСК!*\n\n"
-            f"Бот зафиксировал скачок сообщений. Пропущено сообщений в группе: *{missed_count} шт.*\n"
-            f"Пожалуйста, зайдите в группу и проверьте заказы вручную!"
+            f"Бот зафиксировал скачок в «{escape_md(message.chat.title or str(chat_id))}». Пропущено: *{missed_count} шт.*\n"
+            f"Пожалуйста, зайдите туда и проверьте заказы вручную!"
         )
         for user_id in subscribed_users:
             try:
@@ -165,8 +204,16 @@ async def handle_source_post(message: types.Message):
             except Exception as e:
                 logging.error(f"Ошибка отправки предупреждения {user_id}: {e}")
 
-    # Сохраняем текущий ID как последний успешный
-    save_last_id(current_id)
+    # Сохраняем текущий ID как последний успешный (у каждого источника свой)
+    save_last_id(chat_id, current_id)
+
+    # ЗАЩИТА ОТ ДУБЛЕЙ: один и тот же заказ приходит и из канала, и из группы —
+    # рассылаем только тот, что пришёл первым.
+    key = order_key(message.text)
+    if key in seen_keys:
+        logging.info(f"Заказ {key} уже разослан, дубль из чата {chat_id} пропущен")
+        return
+    mark_seen(key)
 
     # Стандартная логика
     clean_info = parse_order(message.text)
@@ -185,7 +232,8 @@ async def handle_private_test(message: types.Message):
 
 async def main():
     load_users()
-    print(f"Бот запущен. Источник (группа): {SOURCE_CHAT_ID}")
+    load_seen()
+    print(f"Бот запущен. Источники: {sorted(SOURCE_CHAT_IDS)}; известных заказов: {len(seen_keys)}")
     
     # drop_pending_updates изменено на False
     await bot.delete_webhook(drop_pending_updates=False) 

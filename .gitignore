@@ -5,3 +5,5 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+last_ids.json
+seen_orders.json
