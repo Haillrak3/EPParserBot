@@ -15,7 +15,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 PROXY_URL = "http://Er9gyp:nkoVX3@190.185.109.182:9552" 
 USERS_FILE = "users.txt"
-SOURCE_CHANNEL_ID = -1003769319642
+SOURCE_CHAT_ID = -1004443006213  # группа "ЕП v2"
 LAST_ID_FILE = "last_id.txt"
 
 if not TOKEN:
@@ -142,10 +142,10 @@ async def cmd_start(message: types.Message):
     save_user(message.from_user.id)
     await message.answer("✅ Подписка оформлена!")
 
-@dp.channel_post(F.text)
-async def handle_channel_post(message: types.Message):
-    # Мониторим только указанный канал
-    if message.chat.id != SOURCE_CHANNEL_ID or "заказ" not in message.text.lower():
+@dp.message(F.chat.id == SOURCE_CHAT_ID, F.text)
+async def handle_source_post(message: types.Message):
+    # Мониторим только указанную группу
+    if "заказ" not in message.text.lower():
         return
 
     current_id = message.message_id
@@ -156,8 +156,8 @@ async def handle_channel_post(message: types.Message):
         missed_count = (current_id - last_id) - 1
         warning_text = (
             f"⚠️ *ВНИМАНИЕ! ВОЗМОЖЕН ПРОПУСК!*\n\n"
-            f"Бот зафиксировал скачок сообщений. Пропущено постов в канале: *{missed_count} шт.*\n"
-            f"Пожалуйста, зайдите в канал и проверьте заказы вручную!"
+            f"Бот зафиксировал скачок сообщений. Пропущено сообщений в группе: *{missed_count} шт.*\n"
+            f"Пожалуйста, зайдите в группу и проверьте заказы вручную!"
         )
         for user_id in subscribed_users:
             try:
@@ -178,14 +178,14 @@ async def handle_channel_post(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка отправки {user_id}: {e}")
 
-@dp.message(F.text)
+@dp.message(F.chat.type == "private", F.text)
 async def handle_private_test(message: types.Message):
     clean_info = parse_order(message.text)
     await message.answer(f"*Результат теста:*\n\n{clean_info}")
 
 async def main():
     load_users()
-    print(f"Бот запущен. Канал: {SOURCE_CHANNEL_ID}")
+    print(f"Бот запущен. Источник (группа): {SOURCE_CHAT_ID}")
     
     # drop_pending_updates изменено на False
     await bot.delete_webhook(drop_pending_updates=False) 
